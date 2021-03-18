@@ -550,7 +550,7 @@ module FV3GFS_io_mod
       !--- variables below here are optional
       oro_name2(18) = 'lake_frac'  ! lake fraction [0:1]
       oro_name2(19) = 'lake_depth' ! lake depth(m)
-
+   endif !:MKL
       !--- register the 2D fields
       infile=trim(indir)//'/'//trim(fn_oro) !:MKL
       if( open_file(Oro_restart, trim(infile), 'read', domain=fv_domain, is_restart=.true., dont_add_res_to_filename=.true.) ) then !:MKL
@@ -570,7 +570,7 @@ module FV3GFS_io_mod
        endif
       enddo
       nullify(var2_p)
-    endif
+    !endif
 
     !--- read the orography restart/data
     call mpp_error(NOTE,'reading topographic/orographic information from INPUT/oro_data.tile*.nc')
@@ -637,7 +637,7 @@ module FV3GFS_io_mod
         allocate(oro_ls_ss_name(nvar_oro_ls_ss))
         allocate(oro_ls_var(nx,ny,nvar_oro_ls_ss))
         allocate(oro_ss_var(nx,ny,nvar_oro_ls_ss))
-
+      endif
         oro_ls_ss_name(1)  = 'stddev'
         oro_ls_ss_name(2)  = 'convexity'
         oro_ls_ss_name(3)  = 'oa1'
@@ -679,7 +679,6 @@ module FV3GFS_io_mod
           !                oro_ls_ss_name(num), var2_p, domain=fv_domain) !:MKL
         enddo
         nullify(var2_p)
-      endif
 
       !--- read new GSL created orography restart/data
       call mpp_error(NOTE,'reading topographic/orographic information from &
@@ -731,7 +730,7 @@ module FV3GFS_io_mod
 
       !call free_restart_type(Oro_ls_restart) !:MKL
       !call free_restart_type(Oro_ss_restart) !:MKL
-    end if
+   end if
 
     !--- SURFACE FILE
     if (.not. allocated(sfc_name2)) then
