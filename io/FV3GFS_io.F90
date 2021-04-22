@@ -483,6 +483,10 @@ module FV3GFS_io_mod
     character(37) :: infile
     !--- fms2_io file open logic
     logical :: amiopen
+    !--- i-have-no-idea-what-im-doing fix.  used to correctly set axis for fv3_esg_HAFS_v0_hwrf_thompson*
+    !--- fv3_esg_* INPUT files have differing axis names compared to the rest.
+    !--- This causes ugliness when registering axes.
+    logical :: is_esg
     
     nvar_o2  = 19
     nvar_oro_ls_ss = 10
@@ -725,6 +729,9 @@ module FV3GFS_io_mod
     amiopen=open_file(Sfc_restart, trim(infile), "read", domain=fv_domain, is_restart=.true., dont_add_res_to_filename=.true.)
     if( .not.amiopen ) call mpp_error(FATAL, 'Error opening file'//trim(infile))
 
+    !--- set is_esg; this file is only used for fv3_esg_*
+    inquire( file="INPUT/C401_grid.tile7.halo3.nc", exist=is_esg )
+    
     if (.not. allocated(sfc_name2)) then
       !--- allocate the various containers needed for restarts
       allocate(sfc_name2(nvar_s2m+nvar_s2o+nvar_s2mp+nvar_s2r))
@@ -869,21 +876,28 @@ module FV3GFS_io_mod
       endif
       
       if ( .not. warm_start ) then
-        call register_axis(Sfc_restart, 'lon', 'X')
-        call register_axis(Sfc_restart, 'lat', 'Y')
-        call register_axis(Sfc_restart, 'lsoil', dimension_length=Model%lsoil)
+        if( is_esg ) then
+          call register_axis(Sfc_restart, 'xaxis_1', 'X')
+          call register_axis(Sfc_restart, 'yaxis_1', 'Y')
+          call register_axis(Sfc_restart, 'zaxis_1', dimension_length=4)
+          call register_axis(Sfc_restart, 'Time', 1)
+        else
+          call register_axis(Sfc_restart, 'lon', 'X')
+          call register_axis(Sfc_restart, 'lat', 'Y')
+          call register_axis(Sfc_restart, 'lsoil', dimension_length=Model%lsoil)
+        end if
       else
         call register_axis(Sfc_restart, 'xaxis_1', 'X')
         call register_axis(Sfc_restart, 'yaxis_1', 'Y')
         call register_axis(Sfc_restart, 'zaxis_1', dimension_length=Model%kice)
         if (Model%lsm == Model%lsm_noah .or. Model%lsm == Model%lsm_noahmp .or. Model%lsm == Model%lsm_noah_wrfv4) then
-           call register_axis(Sfc_restart, 'zaxis_2', dimension_length=Model%lsoil)
-        elseif(Model%lsm == Model%lsm_ruc) then
-           call register_axis(Sfc_restart, 'zaxis_2', dimension_length=Model%lsoil_lsm)
+          call register_axis(Sfc_restart, 'zaxis_2', dimension_length=Model%lsoil)
+        else if(Model%lsm == Model%lsm_ruc) then
+          call register_axis(Sfc_restart, 'zaxis_2', dimension_length=Model%lsoil_lsm)
         end if
         if(Model%lsm == Model%lsm_noahmp) then
-           call register_axis(Sfc_restart, 'zaxis_3', dimension_length=3)
-           call register_axis(Sfc_restart, 'zaxis_4', dimension_length=7)
+          call register_axis(Sfc_restart, 'zaxis_3', dimension_length=3)
+          call register_axis(Sfc_restart, 'zaxis_4', dimension_length=7)
         end if
         call register_axis(Sfc_restart, 'Time', unlimited)
       end if
@@ -893,23 +907,39 @@ module FV3GFS_io_mod
         var2_p => sfc_var2(:,:,num)
         if (trim(sfc_name2(num)) == 'sncovr'.or. trim(sfc_name2(num)) == 'tsfcl' .or. trim(sfc_name2(num)) == 'zorll' &
                                             .or. trim(sfc_name2(num)) == 'zorli' .or. trim(sfc_name2(num)) == 'zorlw') then
-          call register_restart_field(Sfc_restart, sfc_name2(num), var2_p, dimensions=(/'lat','lon'/), is_optional=.true.)
+           if(is_esg) then
+             call register_restart_field(Sfc_restart, sfc_name2(num), var2_p, dimensions=(/'Time','yaxis_1','xaxis_1'/), is_optional=.true.)
+           else
+             call register_restart_field(Sfc_restart, sfc_name2(num), var2_p, dimensions=(/'lat','lon'/), is_optional=.true.)
+           end if
         else
-          call register_restart_field(Sfc_restart,sfc_name2(num),var2_p, dimensions=(/'lat','lon'/))
+           if(is_esg) then
+             call register_restart_field(Sfc_restart,sfc_name2(num),var2_p, dimensions=(/'Time','yaxis_1','xaxis_1'/))
+           else
+             call register_restart_field(Sfc_restart,sfc_name2(num),var2_p, dimensions=(/'lat','lon'/))
+           end if
         endif
       enddo
       if (Model%nstf_name(1) > 0) then
         mand = .false.
         if (Model%nstf_name(2) == 0) mand = .true.
         do num = nvar_s2m+1,nvar_s2m+nvar_s2o
-          var2_p => sfc_var2(:,:,num)
-          call register_restart_field(Sfc_restart, sfc_name2(num), var2_p, dimensions=(/'lat','lon'/), is_optional=.not.mand)
+           var2_p => sfc_var2(:,:,num)
+          if(is_esg) then
+            call register_restart_field(Sfc_restart, sfc_name2(num), var2_p, dimensions=(/'Time','yaxis_1','xaxis_1'/), is_optional=.not.mand)
+          else
+            call register_restart_field(Sfc_restart, sfc_name2(num), var2_p, dimensions=(/'lat','lon'/), is_optional=.not.mand)
+          end if
         enddo
       endif
       if (Model%lsm == Model%lsm_ruc) then ! nvar_s2mp = 0
         do num = nvar_s2m+nvar_s2o+1, nvar_s2m+nvar_s2o+nvar_s2r
           var2_p => sfc_var2(:,:,num)
-          call register_restart_field(Sfc_restart, sfc_name2(num), var2_p, dimensions=(/'lat','lon'/) )
+          if(is_esg) then
+            call register_restart_field(Sfc_restart, sfc_name2(num), var2_p, dimensions=(/'Time','yaxis_1','xaxis_1'/) )
+          else
+            call register_restart_field(Sfc_restart, sfc_name2(num), var2_p, dimensions=(/'lat','lon'/) )
+          end if
         enddo
       endif ! mp/ruc
 
@@ -918,7 +948,11 @@ module FV3GFS_io_mod
         mand = .false.
         do num = nvar_s2m+nvar_s2o+1,nvar_s2m+nvar_s2o+nvar_s2mp
           var2_p => sfc_var2(:,:,num)
-          call register_restart_field(Sfc_restart, sfc_name2(num), var2_p, dimensions=(/'lat','lon'/), is_optional=.not.mand)
+          if(is_esg) then
+            call register_restart_field(Sfc_restart, sfc_name2(num), var2_p, dimensions=(/'Time','yaxis_1','xaxis_1'/), is_optional=.not.mand)
+          else
+            call register_restart_field(Sfc_restart, sfc_name2(num), var2_p, dimensions=(/'lat','lon'/), is_optional=.not.mand)
+          end if
         enddo
       endif ! noahmp
 
@@ -960,9 +994,20 @@ module FV3GFS_io_mod
       if ( warm_start ) then
         call register_restart_field(Sfc_restart, sfc_name3(num), var3_p, dimensions=(/'xaxis_1', 'yaxis_1', 'lsoil', 'Time'/), is_optional=.true.)
       else
-        call register_restart_field(Sfc_restart, sfc_name3(num), var3_p, dimensions=(/'lat', 'lon', 'lsoil'/), is_optional=.true.)
+        if(is_esg) then
+           call register_restart_field(Sfc_restart, sfc_name3(num), var3_p, dimensions=(/'xaxis_1','yaxis_1','zaxis1','Time'/), is_optional=.true.)
+        else
+          call register_restart_field(Sfc_restart, sfc_name3(num), var3_p, dimensions=(/'lat', 'lon', 'lsoil'/), is_optional=.true.)
+        end if
       end if
     enddo
+    if (Model%lsm == Model%lsm_noahmp) then
+      mand = .false.
+      do num = nvar_s3+1,nvar_s3+3
+        var3_p1 => sfc_var3sn(:,:,:,num)
+        call register_restart_field(Sfc_restart, sfc_name3(num), var3_p, dimensions=(/'lat', 'lon', 'lsoil'/), is_optional=.true.)
+      enddo
+    end if
     if (Model%lsm == Model%lsm_noahmp) then
       mand = .false.
       do num = nvar_s3+1,nvar_s3+3
@@ -1502,16 +1547,16 @@ module FV3GFS_io_mod
         end do
         call write_data(Sfc_restart, 'zaxis_2', buffer)
         deallocate(buffer)
-      elseif(Model%lsm == Model%lsm_ruc) then
-        call register_axis(Sfc_restart, 'zaxis_2', dimension_length=Model%lsoil_lsm)
-        call register_field(Sfc_restart, 'zaxis_2', 'double', (/'zaxis_2'/))
-        call register_variable_attribute(Sfc_restart, 'zaxis_2', 'cartesian_axis', 'Z', str_len=1)
-        allocate(buffer(Model%lsoil_lsm))
-        do i=1, Model%lsoil_lsm
-          buffer(i)=i
-        end do
-        call write_data(Sfc_restart, 'zaxis_2', buffer)
-        deallocate(buffer)
+     ! elseif(Model%lsm == Model%lsm_ruc) then
+     !   call register_axis(Sfc_restart, 'zaxis_1', dimension_length=Model%lsoil_lsm)
+     !   call register_field(Sfc_restart, 'zaxis_1', 'double', (/'zaxis_1'/))
+     !   call register_variable_attribute(Sfc_restart, 'zaxis_1', 'cartesian_axis', 'Z', str_len=1)
+     !   allocate(buffer(Model%lsoil_lsm))
+     !   do i=1, Model%lsoil_lsm
+     !     buffer(i)=i
+     !   end do
+     !   call write_data(Sfc_restart, 'zaxis_1', buffer)
+     !   deallocate(buffer)
       endif
 
       if(Model%lsm == Model%lsm_noahmp) then        
@@ -1737,11 +1782,19 @@ module FV3GFS_io_mod
         call register_restart_field(Sfc_restart, sfc_name3(0), var3_p, dimensions=(/'xaxis_1', 'yaxis_1', 'zaxis_1', 'Time'/))
 !     endif !:MKL
 
-      do num = 1,nvar3
-        var3_p => sfc_var3(:,:,:,num)
-        call register_restart_field(Sfc_restart, sfc_name3(num), var3_p, dimensions=(/'xaxis_1', 'yaxis_1', 'zaxis_2', 'Time'/))
-      enddo
-      nullify(var3_p)
+      if (Model%lsm == Model%lsm_noah .or. Model%lsm == Model%lsm_noahmp .or. Model%lsm == Model%lsm_noah_wrfv4) then
+        do num = 1,nvar3
+          var3_p => sfc_var3(:,:,:,num)
+          call register_restart_field(Sfc_restart, sfc_name3(num), var3_p, dimensions=(/'xaxis_1', 'yaxis_1', 'zaxis_2', 'Time'/))
+        enddo
+        nullify(var3_p)
+      else if (Model%lsm == Model%lsm_ruc) then
+        do num = 1,nvar3
+          var3_p => sfc_var3(:,:,:,num)
+          call register_restart_field(Sfc_restart, sfc_name3(num), var3_p, dimensions=(/'xaxis_1', 'yaxis_1', 'zaxis_1', 'Time'/))
+        enddo
+        nullify(var3_p)
+      end if
 
       if (Model%lsm == Model%lsm_noahmp) then
         mand = .true.
